@@ -155,20 +155,18 @@ def _print_wrap(body, page_css, height):
     components.html(doc, height=height, scrolling=True)
 
 
-def gate_pass_slip(vehicle, material, settings):
-    size = {"A4": "210mm 297mm", "thermal80": "80mm auto"}.get(settings["gatePass"], "148mm 210mm")
-    body = f"""<div style="font-family:'Courier New',monospace;max-width:360px;margin:0 auto;padding:20px 24px;text-align:center">
-      <div style="font-size:14px;letter-spacing:4px;font-weight:bold;margin-bottom:16px">GATE PASS</div>
-      <div style="font-weight:bold;font-size:25px;margin-bottom:12px">{html.escape(vehicle)}</div>
-      <div style="font-weight:bold;font-size:35px">{html.escape(material)}</div></div>"""
-    _print_wrap(body, size, 320)
+def gate_pass_slip(vehicle, material, tare, ts, settings):
+    """Gate pass slip: same bordered table as final slip; 2nd/net weight blank."""
+    final_slip(dict(date=fmt_dt(ts), material=material, vehicle=vehicle,
+                    tare=fmt_num(tare), gross="", net=""), settings, "gatePass")
 
 
-def final_slip(d, settings):
-    if settings["finalWeigh"] == "thermal80":
+def final_slip(d, settings, paper_key="finalWeigh"):
+    paper = settings.get(paper_key, "A5")
+    if paper == "thermal80":
         size = "80mm auto"
     else:
-        size = f"{settings['finalWeigh']} {settings.get('estimateOrientation', 'portrait')}"
+        size = f"{paper} {settings.get('estimateOrientation', 'portrait')}"
     rows = [
         ("DATE", d["date"]),
         ("ITEM", d["material"]),
@@ -285,7 +283,7 @@ def page_gate_pass():
                           remarks=build_gp_remarks(plate, mat, tare), createdAt=ts)
                 txs.append(tx)
                 save("transactions", txs)
-                st.session_state.last_gp = (plate, mat)
+                st.session_state.last_gp = (plate, mat, tare, ts)
                 st.success("Gate pass saved as First Weigh In.")
 
     if "last_gp" in st.session_state:
@@ -381,8 +379,8 @@ def final_slip_dialog(d):
 
 
 @st.dialog("Gate Pass")
-def gp_slip_dialog(veh, mat):
-    gate_pass_slip(veh, mat, load("print_settings", {}))
+def gp_slip_dialog(veh, mat, tare, ts):
+    gate_pass_slip(veh, mat, tare, ts, load("print_settings", {}))
 
 
 @st.dialog("Transaction Details", width="large")
@@ -439,7 +437,7 @@ def page_transactions():
     veh, mat = chunk[sel[0]]["Vehicle"], chunk[sel[0]]["Material"]
     a, b, c, d = st.columns(4)
     if a.button("👁 View", use_container_width=True):
-        gp_slip_dialog(veh, mat) if parse_gp(tx.get("remarks")) else ticket_dialog(tx, veh, mat)
+        gp_slip_dialog(veh, mat, tx.get("firstWeight"), tx.get("firstWeighTime") or tx["createdAt"]) if parse_gp(tx.get("remarks")) else ticket_dialog(tx, veh, mat)
     if b.button("🖨 Reprint", use_container_width=True):
         gp = parse_gp(tx.get("remarks"))
         if gp and tx["status"] == "completed" and tx.get("secondWeight") is not None:
@@ -447,7 +445,7 @@ def page_transactions():
                                    tare=fmt_num(tx.get("firstWeight")), gross=fmt_num(tx["secondWeight"]),
                                    net=fmt_num(tx.get("netWeight"))))
         elif gp:
-            gp_slip_dialog(veh, mat)
+            gp_slip_dialog(veh, mat, tx.get("firstWeight"), tx.get("firstWeighTime") or tx["createdAt"])
         else:
             ticket_dialog(tx, veh, mat)
     if c.button("✏️ Edit", use_container_width=True):
